@@ -50,3 +50,7 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+# Wenlin's additions
+esp_ble_sensor_config.h
+.vscode
