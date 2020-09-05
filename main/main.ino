@@ -5,13 +5,14 @@ using namespace std;
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <sstream>
+#include <stdlib.h>
 
 #include "esp_ble_sensor_config.h"
 
 const char* wifi_ssid = WIFI_SSID; // Enter your WiFi name
 const char* wifi_password =  WIFI_PASSWORD; // Enter WiFi wifi_password
 const char* mqtt_server_address = MQTT_SERVER_ADDRESS;
-const int mqtt_port = MQTT_PORT;
+const int   mqtt_port = MQTT_PORT;
 const char* mqtt_user = MQTT_USER;
 const char* mqtt_password = MQTT_PASSWORD;
 
@@ -21,53 +22,121 @@ BLEScan *pBLEScan;
 
 WiFiClient wifiClient;
 PubSubClient client(wifiClient);
-long lastMsg = 0;
-char msg[50];
-int value = 0;
+String MAC_string;
 
-
-float  current_humidity = -100;
-float  previous_humidity = -100;
-float current_temperature = -100;
-float previous_temperature = -100;
-
-std::vector<std::string> MJ_HT_V1 {"58:2d:34:3a:37:b0", "58:2d:34:38:bd:5d"};
-
-String convertFloatToString(float f)
+// 16 bit
+short getShort(unsigned char* data, int index)
 {
-  String s = String(f,1);
-  return s;
+  return (short)((data[index] << 8) + (data[index + 1]));
+}
+
+short getShortone(unsigned char* data, int index)
+{
+  return (short)((data[index]));
+}
+
+// 16 bit
+unsigned short getUShort(unsigned char* data, int index)
+{
+  return (unsigned short)((data[index] << 8) + (data[index + 1]));
+}
+
+unsigned short getUShortone(unsigned char* data, int index)
+{
+  return (unsigned short)((data[index]));
+}
+
+void publish_sensor_mqtt_msg(String msg, String sensor_id, String meas_id)
+{
+  String publish_topic = "sensor/" + sensor_id + "/" + meas_id;
+  client.publish(publish_topic.c_str(), msg.c_str());
 }
 
 class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 {
-    void onResult(BLEAdvertisedDevice *advertisedDevice)
-    {
-      if (in_array(advertisedDevice->getAddress().toString(), MJ_HT_V1))  {
-        const uint8_t * pData = (const uint8_t*)(advertisedDevice->getServiceData().data());
-        if(pData[11] == 0x0d) {
-        uint16_t rawTemperature = (pData[15] << 8) + uint16_t(pData[14]);
-        uint16_t rawHumidity = (pData[17] << 8) + pData[16];
-        Serial.printf("MJ-HT-V1 temperature is %.01f, humidity %.01f\n", float(rawTemperature) / 10.0, float(rawHumidity) / 10.0);
-      } else if(pData[11] == 0x0a) {
-        Serial.printf("MJ-HT-V1 battery is %u\n", pData[14]);
-      } else if(pData[11] == 0x04) {
-        uint16_t rawTemperature = (pData[15] << 8) + uint16_t(pData[14]);
-        Serial.printf("MJ-HT-V1 temperature is %.01f\n", float(rawTemperature) / 10.0);
-      } else if(pData[11] == 0x06) {
-        uint16_t rawHumidity = (pData[15] << 8) + uint16_t(pData[14]);
-        Serial.printf("MJ-HT-V1 humidity is %.01f\n", float(rawHumidity) / 10.0);
-      } else {
-        Serial.printf("MJ-HT-V1 unknown type %u\n", pData[11]);
+  void onResult(BLEAdvertisedDevice *advertisedDevice)
+  {
+    MAC_string = advertisedDevice->getAddress().toString().c_str();
+    if (advertisedDevice->haveServiceData()) {
+      std::string strServiceData = advertisedDevice->getServiceData();
+      uint8_t pData[255];
+      strServiceData.copy((char *)pData, strServiceData.length(), 0);
+      if (pData[0] == 0x50 & pData[1] == 0x20 & strServiceData.length() >= 16)
+      {
+        uint16_t rawTemperature;
+        uint16_t rawHumidity;
+        switch (pData[11]) {
+          case 0x0d:
+            rawTemperature = (pData[15] << 8) + uint16_t(pData[14]);
+            rawHumidity = (pData[17] << 8) + pData[16];
+            publish_sensor_mqtt_msg(String(float(rawTemperature) / 10.0),MAC_string,"temperature");
+            publish_sensor_mqtt_msg(String(float(rawHumidity) / 10.0),MAC_string,"humidity");
+            Serial.printf("MJ-HT-V1 temperature is %.01f, humidity %.01f\n", float(rawTemperature) / 10.0, float(rawHumidity) / 10.0);
+            break;
+          case 0x0a:
+            publish_sensor_mqtt_msg(String(pData[14]),MAC_string,"battery");
+            Serial.printf("MJ-HT-V1 battery is %u\n", pData[14]);
+            break;
+          case 0x04:
+            rawTemperature = (pData[15] << 8) + uint16_t(pData[14]);
+            publish_sensor_mqtt_msg(String(float(rawTemperature) / 10.0),MAC_string,"temperature");
+            Serial.printf("MJ-HT-V1 temperature is %.01f\n", float(rawTemperature) / 10.0);
+            break;
+          case 0x06:
+            rawHumidity = (pData[15] << 8) + uint16_t(pData[14]);
+            publish_sensor_mqtt_msg(String(float(rawHumidity) / 10.0),MAC_string,"humidity");
+            Serial.printf("MJ-HT-V1 humidity is %.01f\n", float(rawHumidity) / 10.0);
+            break;
+        }
+      }
+    } 
+    if (advertisedDevice->haveManufacturerData()) {
+      std::string strServiceData = advertisedDevice->getManufacturerData();
+      uint8_t mData[255];
+      strServiceData.copy((char *)mData, strServiceData.length(), 0);
+      if (mData[0] == 0x99 && mData[1] == 0x04 && mData[2] == 0x05){
+
+        short tempRaw = getShort(mData, 3);
+        double temperature = (double)tempRaw * 0.005;
+        unsigned short humRaw = getUShort(mData, 5);
+        double humidity = (double)humRaw * 0.0025;
+        unsigned int pressure = (getUShort(mData, 7) + 50000);
+        short accelX = getShort(mData, 9);
+        short accelY = getShort(mData, 11);
+        short accelZ = getShort(mData, 13);
+
+        unsigned short voltRaw = mData[15] << 3 | mData[16] >> 5;
+        unsigned char tPowRaw = mData[16] && 0x1F;
+        unsigned short voltage = voltRaw + 1600;
+        char power = tPowRaw* 2 - 40;
+
+        publish_sensor_mqtt_msg(String(temperature),MAC_string,"temperature");
+        publish_sensor_mqtt_msg(String(humidity),MAC_string,"humidity");
+        publish_sensor_mqtt_msg(String(pressure),MAC_string,"pressure");
+        publish_sensor_mqtt_msg(String(voltage),MAC_string,"battery");
+      }
+
+      if (mData[0] == 0x99 && mData[1] == 0x04 && mData[2] == 0x03){
+
+        short tempRaw = getUShortone(mData, 4) & 0b01111111;
+        short tempRawsign = getUShortone(mData, 4) & 0b10000000;
+        short tempRawdec = getUShortone(mData, 5);
+        double temperature = (double)tempRaw + (double)tempRawdec / 100;
+        if (tempRawsign==128){
+        temperature = temperature * -1;
+        }
+        byte humRaw = getUShortone(mData, 3);
+        short humidity = humRaw / 2;
+        unsigned int pressure = (getUShort(mData, 6) + 50000);
+        unsigned int voltageraw = getUShort(mData, 14);
+        short voltage = (short)voltageraw;
+
+        publish_sensor_mqtt_msg(String(temperature),MAC_string,"temperature");
+        publish_sensor_mqtt_msg(String(humidity),MAC_string,"humidity");
+        publish_sensor_mqtt_msg(String(pressure),MAC_string,"pressure");
+        publish_sensor_mqtt_msg(String(voltage),MAC_string,"battery");
+      }
     }
-  }
-    // }
-    // //
-    // if (advertisedDevice.haveName() && advertisedDevice.haveServiceData() && !advertisedDevice.getName().compare("MJ_HT_V1")) {
-    //
-    // // else if (raw_data.substring(0, 4) == "9904"){
-    // //   Serial.println("Yee ruuvitag");
-    // // }
   }
 };
 
@@ -82,6 +151,7 @@ void setup() {
   initBluetooth();
 }
 void loop() {
+  
   reconnect();
   Serial.printf("Start BLE scan for %d seconds...\n", SCAN_TIME);
   BLEScanResults foundDevices = pBLEScan->start(SCAN_TIME, false);
