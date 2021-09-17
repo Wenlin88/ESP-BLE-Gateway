@@ -1,14 +1,18 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
-#include "esp_ble_sensor_config.h"
+//#include "esp_ble_sensor_config.h"
 
-const char* wifi_ssid = WIFI_SSID; // Enter your WiFi name
-const char* wifi_password =  WIFI_PASSWORD; // Enter WiFi wifi_password
-const char* mqtt_server_address = MQTT_SERVER_ADDRESS;
-const int   mqtt_port = MQTT_PORT;
-const char* mqtt_user = MQTT_USER;
-const char* mqtt_password = MQTT_PASSWORD;
+//define your default values here, if there are different values in config.json, they are overwritten.
+char mqtt_server[40];
+char mqtt_port[6]  = "1883";
+char mqtt_user[16];
+char mqtt_password[32];
+
+String wifi_ssid;
+//String wifi_password[32];
+
+#include "wifi_manager.h"
 
 WiFiClient wifiClient;
 PubSubClient client(wifiClient);
@@ -23,28 +27,16 @@ int connect_to_mqtt() {
   int retry_count = 0;
   delay(10);
   Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(wifi_ssid);
-  WiFi.begin(wifi_ssid, wifi_password);
-  retry_count = 0;
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-    retry_count += 1;
-    if (retry_count >= 10)
-    {
-      Serial.println("");
-      Serial.println("Connection failed!");
-      return 0;
-    }
-  }
+  Serial.print("Connecting to WiFi");
+  connectWiFi();
+  
   randomSeed(micros());
   Serial.println("");
   Serial.println("WiFi connected");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
 
-  client.setServer(mqtt_server_address, mqtt_port);
+  client.setServer(mqtt_server, atoi(mqtt_port));
 
   retry_count = 0;  
   // Loop until we're reconnected

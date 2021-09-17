@@ -16,7 +16,7 @@ TaskHandle_t hibernateTaskHandle = NULL;
 
 #define SCAN_TIME  5 // seconds
 #define uS_TO_S_FACTOR 1000000  /* Conversion factor for micro seconds to seconds */
-#define SLEEP_TIME  10        /* Time ESP32 will go to sleep (in seconds) */
+#define SLEEP_TIME  30        /* Time ESP32 will go to sleep (in seconds) */
 #define EMERGENCY_HIBERNATE 3 * 60
 #define RETRY 3
 
@@ -194,7 +194,6 @@ class ScanAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
   }
 };
 
-
 void hibernate() {
   esp_sleep_enable_timer_wakeup(SLEEP_TIME * uS_TO_S_FACTOR);
   Serial.println("Going to sleep now.");
@@ -211,15 +210,18 @@ void delayedHibernate(void *parameter) {
 void setup() {
   // increase boot count
   bootCount++;
-  // create a hibernate task in case something gets stuck
-  xTaskCreate(delayedHibernate, "hibernate", 4096, NULL, 1, &hibernateTaskHandle);
-
+  
   M5.begin(true, false, true);
   delay(50);
-  
+
   Serial.begin(115200);
   Serial.setTimeout(500);// Set time out for
+
   int mqtt_connected = connect_to_mqtt();
+
+  // create a hibernate task in case something gets stuck
+  xTaskCreate(delayedHibernate, "hibernate", 4096, NULL, 1, &hibernateTaskHandle);
+  
   if (mqtt_connected)
   {
     initBluetooth();
@@ -282,6 +284,3 @@ void initBluetooth(){
   pBLEScan->setInterval(100);
   pBLEScan->setWindow(100);  // less or equal setInterval value
 }
-
-
-

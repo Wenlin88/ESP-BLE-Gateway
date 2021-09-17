@@ -4,5 +4,6 @@
 void draw_cross();
 void draw_array();
 void draw_ok();
+void draw_triangle();
 
 #endif // _ATOM_H    // Put this line at the end of your file.
